@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#e8eee8">
 <title>原子力発電 3D</title>
-<link rel="icon" href="./assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="./style.css">
-<script defer src="./app.bundle.js?v=20261012-1"></script>
+<link rel="icon" href="./assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="./style.css?v=20261013-1">
+<script defer src="./app.bundle.js?v=20261013-1"></script>
 </head>
 <body>
 <main id="scene-wrap">
@@ -14,12 +14,10 @@
 <div class="reactor-controls glass" role="group" aria-label="原子炉の方式">
 <button data-reactor="pwr" class="active" aria-pressed="true">PWR <small>加圧水型</small></button>
 <button data-reactor="bwr" aria-pressed="false">BWR <small>沸騰水型</small></button>
-<button data-reactor="abwr" aria-pressed="false">ABWR <small>改良型</small></button>
 </div>
 <nav class="view-controls glass" aria-label="表示方法">
 <button data-mode="outside" aria-pressed="false">外観</button>
 <button data-mode="cutaway" class="active" aria-pressed="true">内部</button>
-<button data-mode="exploded" aria-pressed="false">分解</button>
 </nav>
 <div class="camera-controls glass">
 <button id="reset-camera" title="全体を見る" aria-label="全体を見る"><svg viewBox="0 0 24 24"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4M8 12h8m-4-4v8"/></svg></button>
@@ -39,32 +37,8 @@
 <input id="timeline" type="range" min="0" max="30" value="0" step="0.01" aria-label="アニメーションの位置" disabled>
 </div>
 <div id="labels" aria-label="設備名"></div>
-<div class="learning-caption"><span id="stage-number">仕組みを見る</span><p id="stage-description" aria-live="polite">核分裂の熱 → 蒸気 → タービン → 発電機</p></div>
-<div class="utility-controls"><button id="toggle-labels" class="glass" aria-pressed="true">設備名</button><button id="about" class="glass" aria-haspopup="dialog">解説・出典</button></div>
+<div class="utility-controls"><button id="toggle-labels" class="glass" aria-pressed="true">設備名</button></div>
 <div class="legend" aria-label="流れの色"><span id="primary-key"><i style="--dot:#bd7196"></i>一次冷却水</span><span><i style="--dot:#dd9c54"></i>蒸気</span><span><i style="--dot:#4a94bd"></i>復水・給水</span><span><i style="--dot:#56a99e"></i>冷却用海水</span></div>
-<dialog id="info"><div class="dialog-head"><h2>原子力発電のしくみ</h2><button id="close-info" aria-label="解説を閉じる">×</button></div><div class="dialog-body">
-<p>燃料の核分裂で生じる熱を使って蒸気をつくり、タービンにつながる発電機を回します。軽水は冷却材と減速材の役割を持ちます。</p>
-<h3>方式ごとの違い</h3><table><thead><tr><th>方式</th><th>蒸気と冷却水の通り道</th></tr></thead><tbody>
-<tr><th>PWR</th><td>一次冷却水は高圧で液体に保たれ、蒸気発生器の伝熱管内を流れます。管外の二次系の水に熱を伝え、二次系で蒸気を発生させます。両系統の水は通常運転時には混ざりません。加圧器は一次系の圧力を調節します。</td></tr>
-<tr><th>BWR</th><td>原子炉内で水を沸騰させ、気水分離器・蒸気乾燥器を通した蒸気をタービンへ送ります。タービン・復水器側も放射線管理が必要です。このモデルは外部再循環ループとジェットポンプを持つ従来型を表します。</td></tr>
-<tr><th>ABWR</th><td>BWRの改良型です。再循環ポンプの羽根車を圧力容器内の下部に設け、外部の大型再循環配管を省きます。モーターは容器の下にあります。格納容器・圧力抑制プールの形状も従来型と区別しています。</td></tr>
-</tbody></table>
-<h3>内部で確認できること</h3><ul>
-<li>燃料は燃料棒を束ねた集合体です。PWRの制御棒クラスタは上から、BWR・ABWRの十字形制御棒は下から挿入されます。</li>
-<li>復水器ではタービンからの蒸気が冷却管の外側で水に戻ります。管内を流れる冷却用海水とは、健全な管壁で隔てられます。</li>
-<li>高圧・低圧タービンと発電機は同じ回転軸でつながります。湿分分離加熱器で水分を除き再加熱してから、低圧タービンに送ります。</li>
-<li>圧力抑制プールは、蒸気を凝縮させて格納容器内の圧力上昇を抑えるための設備です。通常の発電用の水の循環とは別です。</li></ul>
-<h3>この模型の表現範囲</h3><p>通常運転時の主要な構成とエネルギーの流れを示す模式模型です。実機の寸法・本数・配置・色・時間を再現した設計図ではありません。PWRの一次ループと低圧タービンは代表して1組を表示しています。給水加熱器・復水脱塩設備・補機・安全系の多く、湿分分離加熱器の加熱蒸気配管やドレン配管、弁の一部を省略しています。</p>
-<p>再生は流れを順に示す学習アニメーションで、実際の起動・停止操作ではありません。粒と発光は流れや熱・電気エネルギーを示す記号です。三相交流の電線内で電子が一方向に走り続けることや、電線自体が発光することを表すものではありません。原子炉停止後も崩壊熱の除去が必要です。</p>
-<h3>確認に用いた資料</h3><ol class="sources">
-<li><a href="https://www.fepc.or.jp/supply/hatsuden/nuclear/shikumi/keisuiro/" target="_blank" rel="noopener">電気事業連合会：軽水炉のしくみ</a></li>
-<li><a href="https://www.nrc.gov/cdn/legacy/reading-rm/basic-ref/students/for-educators/03.pdf" target="_blank" rel="noopener">米国NRC：Boiling Water Reactor Systems</a></li>
-<li><a href="https://www.nrc.gov/cdn/legacy/reading-rm/training/reactor-concepts-training-course.pdf" target="_blank" rel="noopener">米国NRC：Reactor Concepts Training Course</a></li>
-<li><a href="https://www.mhi.com/jp/business/nuclear/pdf/pamphlet_jp.pdf" target="_blank" rel="noopener">三菱重工：原子力プラント（PWR）の主要設備</a></li>
-<li><a href="https://www.jpower.co.jp/bs/nuclear/oma/feature/abwr/" target="_blank" rel="noopener">J-POWER：ABWRについて</a></li>
-<li><a href="https://power.mhi.com/products/steamturbines/lineup/nuclear-power/" target="_blank" rel="noopener">三菱パワー：原子力用蒸気タービン</a></li></ol>
-<p class="source-note">添付のPWR系統図、BWR系統図、ABWR建屋断面図、燃料集合体SVGも形状確認に参照。権利表示が不明なため、参考画像そのものは教材に転載していません。確認日：2026年10月12日。</p>
-</div></dialog>
 </main>
 <noscript><p>JavaScriptを有効にしてください。</p></noscript>
 </body></html>
