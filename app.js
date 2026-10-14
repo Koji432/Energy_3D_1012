@@ -3,15 +3,16 @@ import { OrbitControls } from './vendor/OrbitControls.js';
 import { RoomEnvironment } from './vendor/RoomEnvironment.js';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)], v=a=>new THREE.Vector3(...a);
 const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
-const state={reactor:'pwr',mode:'cutaway',started:false,playing:false,follow:!reduceMotion,speed:1,time:0,labels:true,step:'overview',rendered:false};
+const state={reactor:'pwr',mode:'cutaway',started:false,playing:false,follow:!reduceMotion,speed:1,time:0,rodTime:null,labels:true,step:'overview',rendered:false};
 let scene,camera,renderer,controls,root,lastTime=0,cameraTween=null,rotor,magnet;
-const flows=[],covers=[],labels=[],pickables=[],variants={},fuelMats=[],powerMats=[];
+const flows=[],covers=[],labels=[],pickables=[],variants={},fuelMats=[],powerMats=[],rodGroups={},primaryTubes=[];
 const dummy=new THREE.Object3D(), yy=new THREE.Vector3(0,1,0);
 const clamp=THREE.MathUtils.clamp;
 const ramp=(t,a,b)=>{const f=clamp((t-a)/(b-a),0,1);return f*f*(3-2*f)};
 const mat=(c,m=.3,r=.5)=>new THREE.MeshStandardMaterial({color:c,metalness:m,roughness:r,side:THREE.DoubleSide});
-const steel=mat(0xb9c8c2,.73,.28),cream=mat(0xc9d1b9),dark=mat(0x4b6560,.5),copper=mat(0xb97e4e,.7,.3),pale=mat(0xe0e3d4,.1,.85),support=mat(0x7f9587),hot=mat(0xdc9459),water=mat(0x468eaf),cool=mat(0x5baba0),gold=mat(0xc9ab52);
-const primary=mat(0xc67091),primaryCool=mat(0xa975ad),fuel=mat(0xae9676,.68,.32);
+const steel=mat(0xb9c8c2,.73,.28),cream=mat(0xc9d1b9),dark=mat(0x4b6560,.5),copper=mat(0xb97e4e,.7,.3),pale=mat(0xe0e3d4,.1,.85),support=mat(0x7f9587),hot=mat(0xdc9459),water=mat(0x287dce),cool=mat(0x168976),gold=mat(0xc9ab52);
+const primary=mat(0xd1538b),primaryCool=mat(0xb3679c),fuel=mat(0xae9676,.68,.32);
+function transparent(material,opacity){const m=material.clone();m.transparent=true;m.opacity=opacity;m.depthWrite=false;return m;}
 function mesh(geo,mat,pos,parent=root){const m=new THREE.Mesh(geo,mat);m.position.copy(v(pos));m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;}
 function box(size,pos,mat=steel,parent=root){return mesh(new THREE.BoxGeometry(...size),mat,pos,parent);}
 function cylinder(r1,r2,len,pos,mat=steel,parent=root,axis='x',segments=40){const m=mesh(new THREE.CylinderGeometry(r1,r2,len,segments),mat,pos,parent);if(axis==='x')m.rotation.z=-Math.PI/2;if(axis==='z')m.rotation.x=Math.PI/2;return m;}
@@ -20,19 +21,20 @@ function pipe(points,r,mat,parent=root,rounded=true){const curve=rounded?new THR
 function lineBetween(a,b,r,mat,parent=root){const delta=v(b).sub(v(a)),m=cylinder(r,r,delta.length(),v(a).add(v(b)).multiplyScalar(.5).toArray(),mat,parent,'y',10);m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),delta.normalize());return m;}
 function newGroup(name,variant='common'){const g=new THREE.Group();g.userData={part:name,variant};root.add(g);return g;}
 function addCover(obj,variant='common'){covers.push({obj,variant});}
-function label(text,pos,part,variant='common',priority=1){const el=document.createElement('button');el.className='part-label';el.textContent=text;el.title=text+'を見る';$('#labels').append(el);el.onclick=()=>{setFollow(false);state.step=part;setCamera(part);};labels.push({el,pos:v(pos),part,variant,priority});}
+function label(text,pos,part,variant='common',priority=1){const el=document.createElement('button');el.className='part-label';el.textContent=text;el.title=text+'を見る';$('#labels').append(el);el.onclick=()=>{setFollow(false);state.step=part;setCamera(part);};const entry={el,pos:v(pos),part,variant,priority};labels.push(entry);return entry;}
+function callout(text,pos,part,variant,color,focus){const l=label(text,pos,part,variant,0);l.el.classList.add('fluid-label',color);l.focus=focus;return l;}
 function addFlow(points,color,type,start=0,variant='common',opts={}){
  const curve=points instanceof THREE.Curve?points:new THREE.CatmullRomCurve3(points.map(v),false,'centripetal');
  const count=opts.count||18,r=opts.radius||.044;
- const inst=new THREE.InstancedMesh(new THREE.ConeGeometry(r,r*3.2,6),new THREE.MeshBasicMaterial({color,toneMapped:false}),count);
+ const inst=new THREE.InstancedMesh(opts.bubbles?new THREE.SphereGeometry(r,8,6):new THREE.ConeGeometry(r,r*3.2,6),new THREE.MeshBasicMaterial({color,toneMapped:false,transparent:!!opts.bubbles,opacity:opts.bubbles?.72:1,depthWrite:!opts.bubbles}),count);
  inst.frustumCulled=false;inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);root.add(inst);
  const samples=Array.from({length:301},(_,i)=>curve.getPointAt(i/300));
  const qs=Array.from({length:301},(_,i)=>new THREE.Quaternion().setFromUnitVectors(yy,curve.getTangentAt(i/300).normalize()));
- flows.push({inst,curve,samples,qs,count,type,start,variant,velocity:opts.velocity||2.8,length:curve.getLength(),inside:opts.inside||false});
+ flows.push({inst,curve,samples,qs,count,type,start,variant,velocity:opts.velocity||2.8,length:curve.getLength(),inside:opts.inside||false,bubbles:!!opts.bubbles});
  return curve;
 }
 function fluid(points,r,material,color,type,start,variant='common',parent=root,opts={}){
- const m=material.clone();m.transparent=true;m.opacity=.30;m.depthWrite=false;
+ const m=transparent(material,opts.opacity??.48);
  const p=pipe(points,r,m,parent);addFlow(p.curve,color,type,start,variant,opts);return p;
 }
 function annulus(ri,ro,height,pos,material,parent,start=0,arc=Math.PI*2){const pts=[[ri,-height/2],[ro,-height/2],[ro,height/2],[ri,height/2],[ri,-height/2]].map(p=>new THREE.Vector2(...p));return mesh(new THREE.LatheGeometry(pts,48,start,arc),material,pos,parent);}
@@ -80,6 +82,8 @@ function containment(kind,parent){
 }
 function fuelCore(cx,cz,cy,parent,kind){
  const m=fuel.clone();m.emissive.set(0xaa5520);fuelMats.push({mat:m,variant:kind});
+ const rods=new THREE.Group();rods.userData.part='rods';parent.add(rods);rodGroups[kind]=rods;
+ const absorber=mat(0x343257,.5,.28);absorber.emissive.set(0x2b2047);absorber.emissiveIntensity=.28;
  // Each represented assembly contains a visible array of fuel rods and spacer grids.
  for(const ax of [-.32,.32])for(const az of [-.32,.32]){
   for(let i=0;i<4;i++)for(let j=0;j<4;j++)cylinder(.036,.036,1.55,[cx+ax+(i-1.5)*.105,cy,cz+az+(j-1.5)*.105],m,parent,'y',8);
@@ -91,50 +95,93 @@ function fuelCore(cx,cz,cy,parent,kind){
   }
   // PWR rod clusters use guide tubes within each assembly, entering from above.
   if(kind==='pwr'){
-   for(const dx of [-.105,.105]){cylinder(.025,.025,1.2,[cx+ax+dx,cy+1.07,cz+az],dark,parent,'y',8);}
-   box([.31,.055,.12],[cx+ax,cy+1.68,cz+az],dark,parent);cylinder(.04,.04,1.1,[cx+ax,cy+2.25,cz+az],dark,parent,'y',8);
+   for(const dx of [-.105,.105])cylinder(.043,.043,1.4,[cx+ax+dx,cy+1.58,cz+az],absorber,rods,'y',12);
+   box([.34,.07,.14],[cx+ax,cy+2.31,cz+az],absorber,rods);
+   cylinder(.048,.048,1.30,[cx+ax,cy+2.97,cz+az],absorber,rods,'y',12);
+   cylinder(.087,.087,.65,[cx+ax,cy+3.39,cz+az],steel,parent,'y',16);
   }
  }
  if(kind!=='pwr'){
   // Cruciform absorber blade between four fuel assemblies, entering from below.
-  box([1.04,1.36,.055],[cx,cy-.33,cz],mat(0x66575b),parent);box([.055,1.36,1.04],[cx,cy-.33,cz],mat(0x66575b),parent);
-  cylinder(.055,.055,1.65,[cx,cy-1.72,cz],dark,parent,'y',12);
+  box([1.04,1.36,.07],[cx,cy-1.6,cz],absorber,rods);box([.07,1.36,1.04],[cx,cy-1.6,cz],absorber,rods);
+  cylinder(.065,.065,1.0,[cx,cy-2.78,cz],absorber,rods,'y',12);
+  cylinder(.13,.13,1.15,[cx,.9,cz],steel,parent,'y',16);
  }
- label(kind==='pwr'?'制御棒（上から挿入）':'制御棒（下から挿入）',[cx,kind==='pwr'?cy+2.85:cy-1.35,cz+.25],'reactor',kind,3);
+ label(kind==='pwr'?'制御棒（上から挿入）':'制御棒（下から挿入）',[cx,kind==='pwr'?cy+2.85:cy-1.35,cz+.25],'rods',kind,1);
  label('燃料集合体',[cx-.75,cy,cz+.85],'reactor',kind,2);
 }
 function buildPWR(){
  const kind='pwr',g=newGroup('reactor',kind);variants[kind]=g;containment(kind,g);
  vessel(-8,0,1.65,3.32,.95,steel,g,kind);fuelCore(-8,0,2.7,g,kind);
  cylinder(.6,.7,.13,[-8,1.86,0],dark,g,'y');
- // The downcomer is outside the core barrel; the core outlet enters the hot leg.
  mesh(new THREE.CylinderGeometry(.75,.75,2.5,40,1,true,Math.PI/2,Math.PI),dark,[-8,3.06,0],g);
- fluid([[-7.07,3.85,0],[-6.28,3.85,0],[-5.9,2.1,-.05],[-4.57,2.1,-.05]],.16,primary,0xf49bb4,'primary',1,kind,g);
- fluid([[-4.07,2.1,-.05],[-3.45,1.7,.45],[-3.8,1.2,1.45],[-5.3,1.2,1.45],[-6.85,2.4,1.45],[-7.06,3.2,.30]],.16,primaryCool,0xd1a1e1,'primary',1,kind,g);
- pump([-5.3,1.2,1.45],g,primaryCool);
- addFlow([[-7.12,3.2,.2],[-7.27,2.25,.2],[-7.56,1.75,.05],[-8,1.92,0],[-8,3.5,0],[-7.72,3.85,0],[-7.07,3.85,0]],0xf3acbc,'primary',1,kind,{inside:true});
- // One representative vertical U-tube steam generator, with separated lower plenums.
- vessel(-4.3,0,2.15,3.53,.86,cream,g,kind);
- box([.055,.53,1.23],[-4.3,2.18,0],dark,g);cylinder(.80,.80,.10,[-4.3,2.45,0],steel,g,'y');
- for(let k=0;k<6;k++){
-  const z=-.5+k*.2,pts=[[-4.60,2.16,z],[-4.60,4.50,z],[-4.52,4.8,z],[-4.30,4.96,z],[-4.08,4.8,z],[-4.0,4.5,z],[-4.0,2.16,z]];
-  pipe(pts,.054,primary,g);if(k===4)addFlow(pts,0xffa6c3,'primary',1,kind,{inside:true,radius:.04});
+ // Pressurized liquid fills the vessel, including the upper and lower heads: no free surface.
+ const primaryVolume=transparent(primary,.19);
+ mesh(new THREE.CylinderGeometry(.89,.89,3.32,40,1,true),primaryVolume,[-8,3.31,0],g);
+ for(const [y,top] of [[1.65,false],[4.97,true]]){
+  const cap=mesh(new THREE.SphereGeometry(.89,32,16,0,Math.PI*2,top?0:Math.PI/2,Math.PI/2),primaryVolume,[-8,y,0],g);cap.scale.y=.48;
  }
- const secWater=water.clone();secWater.transparent=true;secWater.opacity=.12;secWater.depthWrite=false;cylinder(.78,.78,2.9,[-4.3,3.94,0],secWater,g,'y');
- for(let i=0;i<5;i++)addFlow([[-4.9+i*.25,2.8,.46],[-4.9+i*.25,4.4,.46],[-4.55+i*.10,5.2,.3]],0xffc475,'boiling',4,kind,{inside:true,count:6,velocity:.9,radius:.03});
- // Separator/steam space above the U-tubes.
- for(let i=0;i<4;i++)cylinder(.10,.10,.28,[-4.65+i*.23,5.35,0],steel,g,'y');
- fluid([[-4.3,5.88,0],[-4.3,6.42,0],[-2.9,6.42,0],[-1.5,5.65,0],[-1.5,3.95,0],[-.7,3.6,0]],.14,hot,0xffd17c,'steam',7,kind,g);
- // Feedwater enters the secondary side above the tube sheet, never the U-tube plenum.
- fluid([[-1.65,.78,2.3],[-2.7,.78,2.3],[-3.2,3.0,1.25],[-3.53,3.0,.1]],.12,water,0x9ce4ff,'feedwater',20,kind,g);
- // Pressurizer branches off the hot leg. It is not a through-flow steam generator.
+ // Hot leg -> inlet plenum; outlet plenum -> pump -> cold-leg nozzle -> vessel.
+ const inlet=[-4.80,2.20,0],outlet=[-3.80,2.20,0];
+ fluid([[-7.15,3.85,0],[-6.28,3.85,0],[-5.85,3.28,0],[-5.75,2.20,0],inlet],.16,primary,0xff82b6,'primary',1,kind,g);
+ fluid([outlet,[-3.15,2.20,0],[-3.02,1.3,1.05],[-3.8,1.2,1.7],[-5.3,1.2,1.7],[-6.68,2.1,1.7],[-7.15,3.2,.30]],.16,primaryCool,0xf4a2d2,'primary',1,kind,g);
+ pump([-5.3,1.2,1.7],g,primaryCool);
+ // All coolant tracers stay within the vessel and its connected primary piping.
+ addFlow([[-7.15,3.2,.30],[-7.20,2.25,.30],[-7.55,1.48,.25],[-8,1.5,.25],[-8,2.12,.25],[-8,3.50,.25],[-7.75,3.85,.12],[-7.15,3.85,0]],0xff82b6,'primary',1,kind,{inside:true,count:25,radius:.055});
+ // Lower SG chambers share no water across their central divider.
+ const sg=new THREE.Group();sg.userData.part='steamgen';g.add(sg);
+ vessel(-4.3,0,2.15,3.53,.86,cream,sg,kind);
+ for(const [start,material] of [[Math.PI,primary],[0,primaryCool]]){
+  const liquid=transparent(material,.43);
+  mesh(new THREE.CylinderGeometry(.79,.79,.27,40,1,false,start,Math.PI),liquid,[-4.3,2.285,0],sg);
+  const dome=mesh(new THREE.SphereGeometry(.79,32,16,start+Math.PI/2,Math.PI,Math.PI/2,Math.PI/2),liquid,[-4.3,2.15,0],sg);dome.scale.y=.46;
+ }
+ const divider=new THREE.Shape();divider.moveTo(-.79,.27);divider.lineTo(.79,.27);
+ for(let i=0;i<=32;i++){const a=i/32*Math.PI;divider.lineTo(.79*Math.cos(a),-.3634*Math.sin(a));}divider.closePath();
+ const partition=mesh(new THREE.ExtrudeGeometry(divider,{depth:.04,bevelEnabled:false}),dark,[-4.32,2.15,0],sg);partition.rotation.y=Math.PI/2;
+ // A perforated tube sheet: all five U-tubes pass through paired holes into the two plenums.
+ const sheet=new THREE.Shape();sheet.absarc(0,0,.80,0,Math.PI*2,false);
+ const zs=[-.48,-.24,0,.24,.48];
+ for(const x of [-.35,.35])for(const z of zs){const hole=new THREE.Path();hole.absarc(x,z,.078,0,Math.PI*2,true);sheet.holes.push(hole);}
+ const plate=mesh(new THREE.ExtrudeGeometry(sheet,{depth:.12,bevelEnabled:false,curveSegments:24}),steel,[-4.3,2.52,0],sg);plate.rotation.x=Math.PI/2;
+ for(const z of zs){
+  const tube=[[-4.65,2.27,z],[-4.65,4.50,z],[-4.60,4.76,z],[-4.45,4.91,z],[-4.15,4.91,z],[-4.00,4.76,z],[-3.95,4.50,z],[-3.95,2.27,z]];
+  const tubeShape=pipe(tube,.071,transparent(primary,.61),sg);
+  // Reuse the exact tube centerline; the extra flow segments stay inside each plenum.
+  const entry=[-4.65,2.20,z],exit=[-3.95,2.20,z],route=[inlet,entry,...tube,exit,outlet],path=new THREE.CurvePath();
+  path.add(new THREE.LineCurve3(v(inlet),v(entry)));path.add(new THREE.LineCurve3(v(entry),v(tube[0])));path.add(tubeShape.curve);
+  path.add(new THREE.LineCurve3(v(tube.at(-1)),v(exit)));path.add(new THREE.LineCurve3(v(exit),v(outlet)));
+  addFlow(path,0xffa4ce,'primary',1,kind,{inside:true,radius:.032,count:14,velocity:1.35});primaryTubes.push({tube,route});
+ }
+ // Secondary liquid surrounds the sealed primary tubes above the tube sheet.
+ cylinder(.79,.79,2.37,[-4.3,3.705,0],transparent(water,.16),sg,'y');
+ cylinder(.78,.78,.025,[-4.3,4.90,0],transparent(water,.26),sg,'y');
+ for(const y of [3.10,3.70,4.30]){
+  // Amber arrows represent HEAT crossing the metal wall, never primary coolant.
+  addFlow([[-4.65,y,.48],[-4.65,y,.59],[-4.65,y,.75]],0xe5a52b,'heat',3,kind,{inside:true,count:2,radius:.046,velocity:.27});
+  addFlow([[-3.95,y,.48],[-3.95,y,.59],[-3.95,y,.72]],0xe5a52b,'heat',3,kind,{inside:true,count:2,radius:.046,velocity:.27});
+ }
+ for(const x of [-4.68,-4.43,-4.16,-3.96]){
+  addFlow([[x,2.9,.66],[x-.03,3.75,.66],[x,4.55,.60],[x,4.95,.50]],0xffd497,'boiling',4,kind,{inside:true,count:10,velocity:.8,radius:.04,bubbles:true});
+  addFlow([[x,4.98,.42],[-4.3+(x+4.3)*.45,5.34,.25],[-4.3,5.88,0]],0xffd17c,'steam',6,kind,{inside:true,count:6,velocity:.9,radius:.036});
+ }
+ for(let i=0;i<4;i++)cylinder(.10,.10,.28,[-4.65+i*.23,5.35,0],steel,sg,'y');
+ fluid([[-4.3,5.88,0],[-4.3,6.42,0],[-2.9,6.42,0],[-1.5,5.65,0],[-1.5,3.95,0],[-.7,3.6,0]],.14,hot,0xffd17c,'steam',7,kind,sg);
+ fluid([[-1.65,.78,2.3],[-2.7,.78,2.3],[-3.2,3.0,1.25],[-3.57,3.0,.1]],.12,water,0x75c8ff,'feedwater',20,kind,sg);
  vessel(-6.75,-1.28,3.95,1.45,.41,primaryCool,g,kind);
  pipe([[-6.28,3.85,0],[-6.30,3.52,-.7],[-6.75,3.55,-1.28],[-6.75,3.96,-1.28]],.085,primary,g);
  cylinder(.33,.33,.66,[-6.75,4.32,-1.28],primary,g,'y');
  label('原子炉圧力容器',[-8,5.7,0],'reactor',kind,1);
  label('蒸気発生器',[-4.3,6.4,.25],'steamgen',kind,1);
  label('加圧器',[-6.75,5.8,-1.2],'reactor',kind,2);
- label('一次冷却材ポンプ',[-5.3,1.55,1.75],'steamgen',kind,3);
+ label('一次冷却材ポンプ',[-5.3,1.55,1.9],'steamgen',kind,3);
+ callout('容器内も一次冷却水で満たされる',[-8,4.0,.90],'reactor',kind,'primary',['reactor']);
+ callout('密閉した一次系を循環・二次側には出ない',[-6.35,1.4,2.1],'reactor',kind,'primary',['reactor']);
+ callout('管内：一次冷却水',[-4.64,4.48,.50],'steamgen',kind,'primary',['steamgen']);
+ callout('管壁を通るのは熱だけ',[-3.96,3.73,.76],'steamgen',kind,'heat',['steamgen']);
+ callout('管外：二次側の水が沸騰',[-4.3,5.12,.53],'steamgen',kind,'water',['steamgen']);
+ callout('入口水室',[-4.79,2.20,.64],'steamgen',kind,'primary',['steamgen']);
+ callout('出口水室',[-3.82,2.20,.64],'steamgen',kind,'primary',['steamgen']);
 }
 function buildBWR(){
  const kind='bwr',g=newGroup('reactor',kind);variants[kind]=g;containment(kind,g);
@@ -147,7 +194,7 @@ function buildBWR(){
  fluid([[cx+.95,5.75,0],[-5.8,5.75,0],[-4.45,5.75,0],[-2.65,5.75,0],[-1.5,5.1,0],[-1.5,3.95,0],[-.7,3.6,0]],.14,hot,0xffd17c,'steam',7,kind,g);
  // Two schematically placed main steam isolation valves straddle containment boundary.
  for(const x of [-5.23,-4.52]){cylinder(.21,.21,.21,[x,5.75,0],dark,g,'x');cylinder(.065,.065,.4,[x,6.0,0],steel,g,'y');box([.3,.22,.27],[x,6.25,0],cream,g);}
- fluid([[-1.65,.78,2.3],[-3.5,.78,2.3],[-5.2,1.6,2.3],[-5.55,4.35,.25],[cx+1,4.35,.05]],.12,water,0x9ce4ff,'feedwater',20,kind,g);
+ fluid([[-1.65,.78,2.3],[-3.5,.78,2.3],[-5.2,1.6,2.3],[-5.55,4.35,.25],[cx+1,4.35,.05]],.12,water,0x75c8ff,'feedwater',20,kind,g);
  addFlow([[cx+.96,4.35,.1],[cx+.85,3.7,.1],[cx+.85,2.5,.1],[cx+.2,2.3,.1],[cx,2.65,0],[cx,4.25,0]],0x9ce4ff,'reactor-water',1,kind,{inside:true});
  for(const z of [-.26,.26])addFlow([[cx-.2,3.1,z],[cx-.2,4.4,z],[cx-.15,5.15,z],[cx,5.65,z],[cx+.95,5.75,0]],0xffd398,'boiling',4,kind,{inside:true,count:14,velocity:1.2});
  // Separated liquid returns down the annulus, not through a turbine steam line.
@@ -229,30 +276,41 @@ function buildGrid(){
 }
 function buildCondenser(){
  const g=newGroup('condenser'),cx=3.3;
+ const tubeWater=transparent(cool,.66),seaChamber=transparent(cool,.45);
  const cover=new THREE.Group();g.add(cover);box([3.55,1.34,2.12],[cx,1.12,.32],cream,cover);addCover(cover);
  const glass=new THREE.MeshStandardMaterial({color:0x99c4b4,transparent:true,opacity:.09,depthWrite:false,side:THREE.DoubleSide});box([3.56,1.35,2.13],[cx,1.12,.32],glass,g);
  box([3.44,.23,1.98],[cx,.53,.32],water,g);
  // Sea water flows only inside the sealed tubes between end water boxes.
- for(let j=0;j<3;j++)for(let k=0;k<4;k++)cylinder(.06,.06,3.20,[cx,.91+j*.2,-.34+k*.42],cool,g,'x');
- for(const xx of [1.6,5.0])box([.22,.92,1.84],[xx,1.14,.32],cool,g);
- fluid([[.05,.42,4.5],[.05,.8,3.1],[.45,1.1,1.7],[1.50,1.1,.32]],.14,cool,0xa7e4d5,'seawater',.1,'common',g);pump([.05,.8,3.1],g,cool);
- for(const z of [-.34,.08,.5,.92])addFlow([[1.61,1.1,z],[3.3,1.1,z],[4.99,1.1,z]],0x9adfd1,'seawater',.1,'common',{inside:true,count:9,velocity:2.2,radius:.028});
- fluid([[5.10,1.1,.32],[5.7,1.1,1.7],[6.3,.8,3.2],[6.3,.42,4.5]],.14,cool,0xa7e4d5,'seawater',.1,'common',g);
+ for(let j=0;j<3;j++)for(let k=0;k<4;k++){
+  const y=.91+j*.20,z=-.34+k*.42;
+  cylinder(.075,.075,3.2,[cx,y,z],tubeWater,g,'x');
+  for(const x of [1.72,4.88])torus(.075,.018,[x,y,z],steel,g,'x');
+  addFlow([[1.6,y,z],[3.3,y,z],[5.0,y,z]],0x43ebc5,'seawater',.1,'common',{inside:true,count:8,velocity:2.2,radius:.037});
+ }
+ for(const xx of [1.6,5.0])box([.28,.92,1.84],[xx,1.14,.32],seaChamber,g);
+ fluid([[.05,.42,4.5],[.05,.8,3.1],[.45,1.1,1.7],[1.50,1.1,.32]],.14,cool,0x43ebc5,'seawater',.1,'common',g);pump([.05,.8,3.1],g,cool);
+ fluid([[5.10,1.1,.32],[5.7,1.1,1.7],[6.3,.8,3.2],[6.3,.42,4.5]],.14,cool,0x43ebc5,'seawater',.1,'common',g);
  for(let i=0;i<6;i++){const x=1.93+(i%3)*1.35,z=-.13+Math.floor(i/3)*.85;addFlow([[x,1.71,z],[x+.08,1.30,z],[x,.61,z]],0xa6dcf1,'condense',14,'common',{inside:true,count:6,velocity:.5,radius:.026});}
- fluid([[3.3,.50,1.26],[3.3,.78,2.3],[1.2,.78,2.3],[-1.65,.78,2.3]],.12,water,0x9ce4ff,'feedwater',20,'common',g);pump([-1.65,.78,2.3],g,water);
+ fluid([[3.3,.50,1.26],[3.3,.78,2.3],[1.2,.78,2.3],[-1.65,.78,2.3]],.12,water,0x75c8ff,'feedwater',20,'common',g);pump([-1.65,.78,2.3],g,water);
  label('復水器',[3.3,1.85,1.48],'condenser','common',1);label('復水・給水ポンプ',[-1.65,1.27,2.6],'condenser','common',3);
  label('海水取水',[.05,.73,4.6],'condenser','common',2);label('放水（海へ）',[6.3,.73,4.6],'condenser','common',2);
+ callout('管の中：冷却用海水',[3.9,1.19,.92],'condenser','common','sea',['condenser']);
+ callout('管の外：蒸気を冷やして水へ',[2.3,1.73,.85],'condenser','common','water',['condenser']);
+ callout('復水・給水 → 原子炉へ',[1.1,.78,2.3],'condenser','bwr','water',['condenser']);
+ callout('復水・給水 → 蒸気発生器へ',[1.1,.78,2.3],'condenser','pwr','water',['condenser']);
+ callout('海水は海へ戻る・復水とは混ざらない',[6.1,.85,3.5],'condenser','common','sea',['condenser']);
 }
 const views={
  overview:{target:[.6,2.4,.1],offset:[19,16,29]},
- reactor:{target:[-6.9,3.6,0],offset:[6.3,4.4,10]},
- steamgen:{target:[-4.6,3.5,.4],offset:[4.8,3.9,8.3]},
+ reactor:{target:[-6.9,3.6,0],offset:[5,3.3,9]},
+ rods:{target:[-8,3.5,0],offset:[2.8,1.3,6.6]},
+ steamgen:{target:[-4.3,3.65,.2],offset:[3.7,2.2,9.6]},
  turbine:{target:[1.8,3.2,-.3],offset:[5.6,4.5,8.8]},
  generator:{target:[7.15,3.2,0],offset:[4.6,3.1,6.6]},
- condenser:{target:[2.5,1.25,1.7],offset:[6,4.2,8.5]},
+ condenser:{target:[3,1.25,1.7],offset:[5.6,3,10]},
  grid:{target:[10.3,2.3,.5],offset:[6.3,4,8.8]}
 };
-function offsetFor(view,key){const o=v(view.offset);if(camera.aspect<1.15)o.multiplyScalar(Math.min(key==='overview'?2.8:1.8,1.15/camera.aspect));return o;}
+function offsetFor(view,key){const o=v(view.offset);if(camera.aspect<1.15)o.multiplyScalar(Math.min(key==='overview'?2.8:key==='steamgen'?1.3:1.8,1.15/camera.aspect));return o;}
 function setCamera(key,instant=false){
  if(!camera||!controls)return;const view=views[key]||views.overview,target=v(view.target),to=target.clone().add(offsetFor(view,key));
  if(instant||reduceMotion){controls.target.copy(target);camera.position.copy(to);controls.update();cameraTween=null;}
@@ -262,54 +320,71 @@ function setFollow(value){state.follow=value;cameraTween=null;$('#follow').class
 function tour(){
  const sequence=[[0,'overview'],[3,'reactor'],[6,state.reactor==='pwr'?'steamgen':'reactor'],[10,'turbine'],[14,'generator'],[18,'grid'],[22,'condenser'],[27,'overview'],[30,'overview']];
  const t=Math.min(state.time,30);let i=0;while(i<sequence.length-2&&t>sequence[i+1][0])i++;
- const [ta,ka]=sequence[i],[tb,kb]=sequence[i+1],a=views[ka],b=views[kb],f=ramp(t,ta,tb);
+ const [ta,ka]=sequence[i],[tb,kb]=sequence[i+1],a=views[ka],b=views[kb],f=ramp(t,ta,tb);state.step=f>.5?kb:ka;
  controls.target.lerpVectors(v(a.target),v(b.target),f);camera.position.copy(controls.target).add(offsetFor(a,ka).lerp(offsetFor(b,kb),f));
 }
 function setMode(mode){state.mode=mode;$$('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===mode);b.setAttribute('aria-pressed',String(b.dataset.mode===mode));});if(!state.started||!state.follow)setCamera(state.step);updateVisuals();}
 function chooseReactor(type){
  state.reactor=type;$$('[data-reactor]').forEach(b=>{b.classList.toggle('active',b.dataset.reactor===type);b.setAttribute('aria-pressed',String(b.dataset.reactor===type));});
- $('#type-summary').textContent={pwr:'一次系と二次系を分けて熱を伝える',bwr:'原子炉の蒸気で直接タービンを回す'}[type];
- $('#primary-key').hidden=type!=='pwr';reset();
+ $('#type-summary').textContent={pwr:'一次冷却水は密閉循環・二次側の水へ熱だけを伝える',bwr:'炉水・復水・給水の循環と、冷却用海水は別の系統'}[type];
+ $('#primary-key').hidden=type!=='pwr';views.rods.target=type==='pwr'?[-8,3.5,0]:[-7.3,2.9,0];reset();
+}
+function rodProgress(){
+ if(state.rodTime===null)return 0;
+ // Playback is deliberately slowed for observation; these are not physical scram times.
+ const u=clamp((state.rodTime-.8)/3.2,0,1);return state.reactor==='pwr'?u*u:ramp(u,0,1);
 }
 function updateVisuals(){
- const t=state.started?state.time:0;
+ const t=state.started?state.time:0,demo=state.rodTime!==null,progress=rodProgress();
  for(const [key,g] of Object.entries(variants))g.visible=key===state.reactor;
  for(const c of covers)c.obj.visible=state.mode==='outside';
- const angle=2.1*Math.max(0,t-10)*ramp(t,10,12);rotor.rotation.x=angle;magnet.rotation.x=angle;
- for(const f of fuelMats)f.mat.emissiveIntensity=state.started?ramp(t,0,2)*.6:0;
- for(const p of powerMats)p.m.opacity=state.started?ramp(t,15,17)*p.opacity:0;
+ for(const [key,g] of Object.entries(rodGroups))g.position.y=key===state.reactor?(key==='pwr'?-1.58:1.60)*progress:0;
+ // Insertion is a separate close-up, not a simulated plant shutdown sequence.
+ // Hide the generation animation there; keep coolant visible and retain residual-heat glow.
+ const angle=demo?0:2.1*Math.max(0,t-10)*ramp(t,10,12);rotor.rotation.x=angle;magnet.rotation.x=angle;
+ for(const f of fuelMats)f.mat.emissiveIntensity=demo?.07+.53*(1-progress):state.started?ramp(t,0,2)*.6:0;
+ for(const p of powerMats)p.m.opacity=!demo&&state.started?ramp(t,15,17)*p.opacity:0;
+ const cooling=['primary','reactor-water','recirculation','seawater'];
  for(const f of flows){
-  const elapsed=state.started?t-f.start:-1;f.inst.visible=elapsed>=0&&(f.variant==='common'||f.variant===state.reactor)&&!(f.inside&&state.mode==='outside');
+  const elapsed=demo?state.rodTime+30:state.started?t-f.start:-1;
+  f.inst.visible=elapsed>=0&&(!demo||cooling.includes(f.type))&&(f.variant==='common'||f.variant===state.reactor)&&!(f.inside&&state.mode==='outside');
   if(!f.inst.visible)continue;
   for(let i=0;i<f.count;i++){
    const u=elapsed*f.velocity/f.length-i/f.count,frac=((u%1)+1)%1,idx=Math.min(299,Math.floor(frac*300));
-   dummy.position.lerpVectors(f.samples[idx],f.samples[idx+1],frac*300-idx);dummy.quaternion.copy(f.qs[idx]);dummy.scale.setScalar(u>=0?1:0);dummy.updateMatrix();f.inst.setMatrixAt(i,dummy.matrix);
+   dummy.position.lerpVectors(f.samples[idx],f.samples[idx+1],frac*300-idx);dummy.quaternion.copy(f.qs[idx]);dummy.scale.setScalar(u>=0?(f.bubbles?.65+frac*.85:1):0);dummy.updateMatrix();f.inst.setMatrixAt(i,dummy.matrix);
   }f.inst.instanceMatrix.needsUpdate=true;
  }
- $('#timeline').value=Math.min(t,30);$('#timeline').style.setProperty('--progress',`${Math.min(t/30,1)*100}%`);
+ const timeline=demo?state.rodTime/4.5*30:Math.min(t,30);
+ $('#timeline').value=timeline;$('#timeline').style.setProperty('--progress',`${timeline/30*100}%`);
+ const status=demo?(progress===1?'挿入完了・停止後も冷却が必要':state.reactor==='pwr'?'上から自重で落下（動きは模式）':'下から水圧で挿入（動きは模式）'):'核分裂の連鎖反応を止める動き';
+ if($('#rod-status').textContent!==status)$('#rod-status').textContent=status;
+ $('#heat-key').hidden=state.reactor!=='pwr'||state.step!=='steamgen'||state.mode==='outside'||demo;
 }
 function updateLabels(){
  const rect=renderer.domElement.getBoundingClientRect(),placed=[];
- const candidates=labels.filter(l=>l.variant==='common'||l.variant===state.reactor).sort((a,b)=>a.priority-b.priority);
+ const candidates=labels.filter(l=>(l.variant==='common'||l.variant===state.reactor)&&(!l.focus||l.focus.includes(state.step))).sort((a,b)=>a.priority-b.priority);
  for(const l of labels)l.el.hidden=true;if(!state.labels)return;
  for(const l of candidates){
   if(state.mode==='outside'&&!['grid','generator'].includes(l.part))continue;
   if(rect.width<600&&l.priority>1)continue;
   if(l.priority===3&&camera.position.distanceTo(controls.target)>20)continue;
   const p=l.pos.clone().project(camera),x=(p.x*.5+.5)*rect.width,y=(-p.y*.5+.5)*rect.height-13;
-  if(p.z>1||p.z<0||x<45||x>rect.width-45||y<(rect.width<600?175:150)||y>rect.height-(rect.width<600?225:190))continue;
-  const width=l.el.textContent.length*(rect.width<600?9:10)+16,box={x:x-width/2,y:y-26,w:width,h:43};
+  if(p.z>1||p.z<0||x<45||x>rect.width-45||y<(rect.width<600?245:220)||y>rect.height-(rect.width<600?225:190))continue;
+  const width=l.el.textContent.length*(rect.width<600?9:10)+16,labelX=clamp(x,width/2+8,rect.width-width/2-8),box={x:labelX-width/2,y:y-26,w:width,h:43};
   if(placed.some(b=>box.x<b.x+b.w+5&&box.x+box.w+5>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y))continue;
-  placed.push(box);l.el.style.left=x+'px';l.el.style.top=y+'px';l.el.hidden=false;
+  placed.push(box);l.el.style.left=labelX+'px';l.el.style.top=y+'px';l.el.hidden=false;
  }
 }
 function updateButtons(){
  $('#start span').textContent=state.started?'最初から':'スタート';$('#pause').disabled=!state.started;$('#timeline').disabled=!state.started;
  $('#pause').innerHTML=state.playing?'<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>':'<svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></svg>';
  $('#pause').setAttribute('aria-label',state.playing?'一時停止':'再開');$('#pause').title=state.playing?'一時停止':'再開';
+ $('#insert-rods').textContent=(state.reactor==='pwr'?'↓ ':'↑ ')+(state.rodTime===null?'制御棒を入れる':'挿入をもう一度');
+ $('#timeline').max=30;$('#timeline').setAttribute('aria-label',state.rodTime===null?'アニメーションの位置':'制御棒の挿入位置');
 }
-function start(){state.started=true;state.playing=true;state.time=0;state.step='overview';setFollow(!reduceMotion);setMode('cutaway');setCamera('overview',true);updateButtons();}
-function reset(){state.started=false;state.playing=false;state.time=0;state.step='overview';setFollow(!reduceMotion);setCamera('overview',true);updateButtons();updateVisuals();}
+function start(){state.rodTime=null;state.started=true;state.playing=true;state.time=0;state.step='overview';setFollow(!reduceMotion);setMode('cutaway');setCamera('overview',true);updateButtons();}
+function reset(){state.rodTime=null;state.started=false;state.playing=false;state.time=0;state.step='overview';setFollow(!reduceMotion);setCamera('overview',true);updateButtons();updateVisuals();}
+function insertRods(){state.rodTime=0;state.started=true;state.playing=true;state.time=0;state.step='rods';setFollow(false);setMode('cutaway');setCamera('rods');updateButtons();updateVisuals();}
 function mergeStaticSiblings(parent){
  for(const c of [...parent.children])if(c.isGroup)mergeStaticSiblings(c);
  const batches=new Map();
@@ -343,7 +418,7 @@ function init(){
  root.traverse(o=>{if(o.isMesh&&!o.isInstancedMesh){let p=o;while(p&&!p.userData.part)p=p.parent;if(p){o.userData.part=p.userData.part;pickables.push(o);}}});
  controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.dampingFactor=.085;controls.minDistance=4;controls.maxDistance=115;controls.minPolarAngle=.15;controls.maxPolarAngle=Math.PI*.48;controls.addEventListener('start',()=>setFollow(false));setCamera('overview',true);
  let oldWidth=wrap.clientWidth,oldHeight=wrap.clientHeight;
- new ResizeObserver(()=>{camera.aspect=wrap.clientWidth/wrap.clientHeight;camera.updateProjectionMatrix();renderer.setSize(wrap.clientWidth,wrap.clientHeight,false);if(Math.abs(oldWidth-wrap.clientWidth)>35||Math.abs(oldHeight-wrap.clientHeight)>80){oldWidth=wrap.clientWidth;oldHeight=wrap.clientHeight;if(state.follow&&state.started)tour();else setCamera(state.step,true);}}).observe(wrap);
+ new ResizeObserver(()=>{camera.aspect=wrap.clientWidth/wrap.clientHeight;camera.updateProjectionMatrix();renderer.setSize(wrap.clientWidth,wrap.clientHeight,false);if(Math.abs(oldWidth-wrap.clientWidth)>35||Math.abs(oldHeight-wrap.clientHeight)>80){oldWidth=wrap.clientWidth;oldHeight=wrap.clientHeight;if(state.follow&&state.started&&state.rodTime===null)tour();else setCamera(state.step,true);}}).observe(wrap);
  const ray=new THREE.Raycaster();let down;
  $('#scene').addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY};});
  $('#scene').addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down.x,e.clientY-down.y)>5)return;const r=renderer.domElement.getBoundingClientRect();ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),camera);const hit=ray.intersectObjects(pickables).find(h=>{let o=h.object;while(o){if(!o.visible)return false;o=o.parent}return true});if(hit){setFollow(false);state.step=hit.object.userData.part;setCamera(state.step);}});
@@ -351,10 +426,11 @@ function init(){
  renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();state.playing=false;$('#loading').hidden=false;$('#loading').className='error';$('#loading').textContent='3Dの描画が中断されました。ページを再読み込みしてください。';});
  $('#loading').hidden=true;updateButtons();updateVisuals();requestAnimationFrame(animate);
 }
-function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-(lastTime||now))/1000,.06);lastTime=now;if(document.hidden)return;if(state.playing)state.time+=dt*state.speed;if(state.follow&&state.started&&state.time<=30)tour();else if(cameraTween){cameraTween.elapsed+=dt;const f=ramp(cameraTween.elapsed,0,.95);camera.position.lerpVectors(cameraTween.from,cameraTween.to,f);controls.target.lerpVectors(cameraTween.fromTarget,cameraTween.target,f);if(f===1)cameraTween=null;}updateVisuals();controls.update();updateLabels();renderer.render(scene,camera);state.rendered=true;}
-$('#start').onclick=start;$('#pause').onclick=()=>{state.playing=!state.playing;updateButtons();};$('#reset').onclick=reset;
+function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-(lastTime||now))/1000,.06);lastTime=now;if(document.hidden)return;if(state.playing){if(state.rodTime!==null){state.rodTime=Math.min(4.5,state.rodTime+dt*state.speed);if(state.rodTime===4.5){state.playing=false;updateButtons();}}else state.time+=dt*state.speed;}if(state.follow&&state.started&&state.rodTime===null&&state.time<=30)tour();else if(cameraTween){cameraTween.elapsed+=dt;const f=ramp(cameraTween.elapsed,0,.95);camera.position.lerpVectors(cameraTween.from,cameraTween.to,f);controls.target.lerpVectors(cameraTween.fromTarget,cameraTween.target,f);if(f===1)cameraTween=null;}updateVisuals();controls.update();updateLabels();renderer.render(scene,camera);state.rendered=true;}
+$('#insert-rods').onclick=insertRods;
+$('#start').onclick=start;$('#pause').onclick=()=>{if(state.rodTime===4.5)state.rodTime=0;state.playing=!state.playing;updateButtons();};$('#reset').onclick=reset;
 $('#speed').onchange=e=>state.speed=Number(e.target.value);$('#follow').onclick=()=>setFollow(!state.follow);
-$('#timeline').oninput=e=>{state.time=Number(e.target.value);updateVisuals();if(state.follow)tour();};
+$('#timeline').oninput=e=>{if(state.rodTime!==null)state.rodTime=Number(e.target.value)/30*4.5;else state.time=Number(e.target.value);updateVisuals();if(state.follow&&state.rodTime===null)tour();};
 $$('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));$$('[data-reactor]').forEach(b=>b.onclick=()=>chooseReactor(b.dataset.reactor));
 $('#reset-camera').onclick=()=>{setFollow(false);state.step='overview';setCamera('overview');};
 function zoom(f){if(!camera)return;setFollow(false);camera.position.sub(controls.target).multiplyScalar(f).add(controls.target);controls.update();}
@@ -362,4 +438,4 @@ $('#zoom-in').onclick=()=>zoom(.82);$('#zoom-out').onclick=()=>zoom(1.22);
 $('#fullscreen').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await $('#scene-wrap').requestFullscreen?.();}catch{}};
 $('#toggle-labels').onclick=()=>{state.labels=!state.labels;$('#toggle-labels').setAttribute('aria-pressed',String(state.labels));};
 try{init()}catch(err){console.error(err);$('#loading').hidden=false;$('#loading').className='error';$('#loading').innerHTML='<div>3Dを表示できませんでした。</div><button onclick="location.reload()">再読み込み</button>';$$('button,select,input').forEach(b=>{if(!b.closest('#loading'))b.disabled=true;});}
-window.energyLab={snapshot:()=>({...state,rotorAngle:rotor?.rotation.x,magnetAngle:magnet?.rotation.x,drawCalls:renderer?.info.render.calls,visibleVariants:Object.entries(variants).filter(([,g])=>g.visible).map(([k])=>k),flows:flows.filter(f=>f.inst.visible).map(f=>({type:f.type,variant:f.variant})),visibleCovers:covers.filter(c=>c.obj.visible&&(c.variant==='common'||c.variant===state.reactor)).length,labels:labels.filter(l=>!l.el.hidden).map(l=>l.el.textContent),camera:camera?.position.toArray()} )};
+window.energyLab={snapshot:()=>({...state,rotorAngle:rotor?.rotation.x,magnetAngle:magnet?.rotation.x,drawCalls:renderer?.info.render.calls,rodProgress:rodProgress(),rodOffsets:Object.fromEntries(Object.entries(rodGroups).map(([k,g])=>[k,g.position.y])),fuelGlow:fuelMats.find(f=>f.variant===state.reactor)?.mat.emissiveIntensity,primaryTubes:primaryTubes.map(p=>({inlet:p.route[0],outlet:p.route.at(-1),tube:p.tube})),visibleVariants:Object.entries(variants).filter(([,g])=>g.visible).map(([k])=>k),flows:flows.filter(f=>f.inst.visible).map(f=>({type:f.type,variant:f.variant})),visibleCovers:covers.filter(c=>c.obj.visible&&(c.variant==='common'||c.variant===state.reactor)).length,labels:labels.filter(l=>!l.el.hidden).map(l=>l.el.textContent),cameraMoving:!!cameraTween,camera:camera?.position.toArray()} )};
