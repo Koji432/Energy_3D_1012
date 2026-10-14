@@ -3,15 +3,14 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#e8eee8">
 <title>原子力発電 3D</title>
-<link rel="icon" href="./assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="./style.css?v=20261014-1">
-<script defer src="./app.bundle.js?v=20261014-1"></script>
+<link rel="icon" href="./assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="./style.css?v=20261014-2">
+<script defer src="./app.bundle.js?v=20261014-2"></script>
 </head>
 <body>
 <main id="scene-wrap">
 <canvas id="scene" tabindex="0" aria-label="原子力発電の3Dモデル。ドラッグで回転、ピンチまたはホイールで拡大縮小。矢印キーとプラス・マイナスキーでも操作できます。"></canvas>
 <div id="loading" role="status" aria-label="3Dモデルを読み込んでいます"><span></span></div>
-<header class="plant-title"><h1>原子力発電 <span>3D</span></h1><p id="type-summary">一次冷却水は密閉循環・二次側の水へ熱だけを伝える</p></header>
-<div class="rod-controls"><button id="insert-rods" class="glass">↓ 制御棒を入れる</button><p id="rod-status" role="status" aria-live="polite">核分裂の連鎖反応を止める動き</p></div>
+<header class="plant-title"><h1>原子力発電 <span>3D</span></h1></header>
 <div class="reactor-controls glass" role="group" aria-label="原子炉の方式">
 <button data-reactor="pwr" class="active" aria-pressed="true">PWR <small>加圧水型</small></button>
 <button data-reactor="bwr" aria-pressed="false">BWR <small>沸騰水型</small></button>

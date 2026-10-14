@@ -3,7 +3,7 @@ import { OrbitControls } from './vendor/OrbitControls.js';
 import { RoomEnvironment } from './vendor/RoomEnvironment.js';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)], v=a=>new THREE.Vector3(...a);
 const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
-const state={reactor:'pwr',mode:'cutaway',started:false,playing:false,follow:!reduceMotion,speed:1,time:0,rodTime:null,labels:true,step:'overview',rendered:false};
+const state={reactor:'pwr',mode:'cutaway',started:false,playing:false,follow:!reduceMotion,speed:1,time:0,labels:true,step:'overview',rendered:false};
 let scene,camera,renderer,controls,root,lastTime=0,cameraTween=null,rotor,magnet;
 const flows=[],covers=[],labels=[],pickables=[],variants={},fuelMats=[],powerMats=[],rodGroups={},primaryTubes=[];
 const dummy=new THREE.Object3D(), yy=new THREE.Vector3(0,1,0);
@@ -326,39 +326,39 @@ function tour(){
 function setMode(mode){state.mode=mode;$$('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===mode);b.setAttribute('aria-pressed',String(b.dataset.mode===mode));});if(!state.started||!state.follow)setCamera(state.step);updateVisuals();}
 function chooseReactor(type){
  state.reactor=type;$$('[data-reactor]').forEach(b=>{b.classList.toggle('active',b.dataset.reactor===type);b.setAttribute('aria-pressed',String(b.dataset.reactor===type));});
- $('#type-summary').textContent={pwr:'一次冷却水は密閉循環・二次側の水へ熱だけを伝える',bwr:'炉水・復水・給水の循環と、冷却用海水は別の系統'}[type];
  $('#primary-key').hidden=type!=='pwr';views.rods.target=type==='pwr'?[-8,3.5,0]:[-7.3,2.9,0];reset();
 }
 function rodProgress(){
- if(state.rodTime===null)return 0;
- // Playback is deliberately slowed for observation; these are not physical scram times.
- const u=clamp((state.rodTime-.8)/3.2,0,1);return state.reactor==='pwr'?u*u:ramp(u,0,1);
+ if(!state.started)return 0;
+ // Occasional partial adjustment during playback, not repeated emergency shutdowns.
+ // Each illustrative cycle includes a long rest; timing and travel are schematic.
+ const phase=state.time%24;
+ if(phase<2)return 0;
+ if(phase<5)return .65*ramp(phase,2,5);
+ if(phase<7)return .65;
+ if(phase<10)return .65*(1-ramp(phase,7,10));
+ return 0;
 }
 function updateVisuals(){
- const t=state.started?state.time:0,demo=state.rodTime!==null,progress=rodProgress();
+ const t=state.started?state.time:0,progress=rodProgress();
  for(const [key,g] of Object.entries(variants))g.visible=key===state.reactor;
  for(const c of covers)c.obj.visible=state.mode==='outside';
  for(const [key,g] of Object.entries(rodGroups))g.position.y=key===state.reactor?(key==='pwr'?-1.58:1.60)*progress:0;
- // Insertion is a separate close-up, not a simulated plant shutdown sequence.
- // Hide the generation animation there; keep coolant visible and retain residual-heat glow.
- const angle=demo?0:2.1*Math.max(0,t-10)*ramp(t,10,12);rotor.rotation.x=angle;magnet.rotation.x=angle;
- for(const f of fuelMats)f.mat.emissiveIntensity=demo?.07+.53*(1-progress):state.started?ramp(t,0,2)*.6:0;
- for(const p of powerMats)p.m.opacity=!demo&&state.started?ramp(t,15,17)*p.opacity:0;
- const cooling=['primary','reactor-water','recirculation','seawater'];
+ const angle=2.1*Math.max(0,t-10)*ramp(t,10,12);rotor.rotation.x=angle;magnet.rotation.x=angle;
+ for(const f of fuelMats)f.mat.emissiveIntensity=state.started?ramp(t,0,2)*.6*(1-.45*progress):0;
+ for(const p of powerMats)p.m.opacity=state.started?ramp(t,15,17)*p.opacity:0;
  for(const f of flows){
-  const elapsed=demo?state.rodTime+30:state.started?t-f.start:-1;
-  f.inst.visible=elapsed>=0&&(!demo||cooling.includes(f.type))&&(f.variant==='common'||f.variant===state.reactor)&&!(f.inside&&state.mode==='outside');
+  const elapsed=state.started?t-f.start:-1;
+  f.inst.visible=elapsed>=0&&(f.variant==='common'||f.variant===state.reactor)&&!(f.inside&&state.mode==='outside');
   if(!f.inst.visible)continue;
   for(let i=0;i<f.count;i++){
    const u=elapsed*f.velocity/f.length-i/f.count,frac=((u%1)+1)%1,idx=Math.min(299,Math.floor(frac*300));
    dummy.position.lerpVectors(f.samples[idx],f.samples[idx+1],frac*300-idx);dummy.quaternion.copy(f.qs[idx]);dummy.scale.setScalar(u>=0?(f.bubbles?.65+frac*.85:1):0);dummy.updateMatrix();f.inst.setMatrixAt(i,dummy.matrix);
   }f.inst.instanceMatrix.needsUpdate=true;
  }
- const timeline=demo?state.rodTime/4.5*30:Math.min(t,30);
+ const timeline=Math.min(t,30);
  $('#timeline').value=timeline;$('#timeline').style.setProperty('--progress',`${timeline/30*100}%`);
- const status=demo?(progress===1?'挿入完了・停止後も冷却が必要':state.reactor==='pwr'?'上から自重で落下（動きは模式）':'下から水圧で挿入（動きは模式）'):'核分裂の連鎖反応を止める動き';
- if($('#rod-status').textContent!==status)$('#rod-status').textContent=status;
- $('#heat-key').hidden=state.reactor!=='pwr'||state.step!=='steamgen'||state.mode==='outside'||demo;
+ $('#heat-key').hidden=state.reactor!=='pwr'||state.step!=='steamgen'||state.mode==='outside';
 }
 function updateLabels(){
  const rect=renderer.domElement.getBoundingClientRect(),placed=[];
@@ -369,7 +369,7 @@ function updateLabels(){
   if(rect.width<600&&l.priority>1)continue;
   if(l.priority===3&&camera.position.distanceTo(controls.target)>20)continue;
   const p=l.pos.clone().project(camera),x=(p.x*.5+.5)*rect.width,y=(-p.y*.5+.5)*rect.height-13;
-  if(p.z>1||p.z<0||x<45||x>rect.width-45||y<(rect.width<600?245:220)||y>rect.height-(rect.width<600?225:190))continue;
+  if(p.z>1||p.z<0||x<45||x>rect.width-45||y<(rect.width<600?175:150)||y>rect.height-(rect.width<600?225:190))continue;
   const width=l.el.textContent.length*(rect.width<600?9:10)+16,labelX=clamp(x,width/2+8,rect.width-width/2-8),box={x:labelX-width/2,y:y-26,w:width,h:43};
   if(placed.some(b=>box.x<b.x+b.w+5&&box.x+box.w+5>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y))continue;
   placed.push(box);l.el.style.left=labelX+'px';l.el.style.top=y+'px';l.el.hidden=false;
@@ -379,12 +379,9 @@ function updateButtons(){
  $('#start span').textContent=state.started?'最初から':'スタート';$('#pause').disabled=!state.started;$('#timeline').disabled=!state.started;
  $('#pause').innerHTML=state.playing?'<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>':'<svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></svg>';
  $('#pause').setAttribute('aria-label',state.playing?'一時停止':'再開');$('#pause').title=state.playing?'一時停止':'再開';
- $('#insert-rods').textContent=(state.reactor==='pwr'?'↓ ':'↑ ')+(state.rodTime===null?'制御棒を入れる':'挿入をもう一度');
- $('#timeline').max=30;$('#timeline').setAttribute('aria-label',state.rodTime===null?'アニメーションの位置':'制御棒の挿入位置');
 }
-function start(){state.rodTime=null;state.started=true;state.playing=true;state.time=0;state.step='overview';setFollow(!reduceMotion);setMode('cutaway');setCamera('overview',true);updateButtons();}
-function reset(){state.rodTime=null;state.started=false;state.playing=false;state.time=0;state.step='overview';setFollow(!reduceMotion);setCamera('overview',true);updateButtons();updateVisuals();}
-function insertRods(){state.rodTime=0;state.started=true;state.playing=true;state.time=0;state.step='rods';setFollow(false);setMode('cutaway');setCamera('rods');updateButtons();updateVisuals();}
+function start(){state.started=true;state.playing=true;state.time=0;state.step='overview';setFollow(!reduceMotion);setMode('cutaway');setCamera('overview',true);updateButtons();}
+function reset(){state.started=false;state.playing=false;state.time=0;state.step='overview';setFollow(!reduceMotion);setCamera('overview',true);updateButtons();updateVisuals();}
 function mergeStaticSiblings(parent){
  for(const c of [...parent.children])if(c.isGroup)mergeStaticSiblings(c);
  const batches=new Map();
@@ -418,7 +415,7 @@ function init(){
  root.traverse(o=>{if(o.isMesh&&!o.isInstancedMesh){let p=o;while(p&&!p.userData.part)p=p.parent;if(p){o.userData.part=p.userData.part;pickables.push(o);}}});
  controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.dampingFactor=.085;controls.minDistance=4;controls.maxDistance=115;controls.minPolarAngle=.15;controls.maxPolarAngle=Math.PI*.48;controls.addEventListener('start',()=>setFollow(false));setCamera('overview',true);
  let oldWidth=wrap.clientWidth,oldHeight=wrap.clientHeight;
- new ResizeObserver(()=>{camera.aspect=wrap.clientWidth/wrap.clientHeight;camera.updateProjectionMatrix();renderer.setSize(wrap.clientWidth,wrap.clientHeight,false);if(Math.abs(oldWidth-wrap.clientWidth)>35||Math.abs(oldHeight-wrap.clientHeight)>80){oldWidth=wrap.clientWidth;oldHeight=wrap.clientHeight;if(state.follow&&state.started&&state.rodTime===null)tour();else setCamera(state.step,true);}}).observe(wrap);
+ new ResizeObserver(()=>{camera.aspect=wrap.clientWidth/wrap.clientHeight;camera.updateProjectionMatrix();renderer.setSize(wrap.clientWidth,wrap.clientHeight,false);if(Math.abs(oldWidth-wrap.clientWidth)>35||Math.abs(oldHeight-wrap.clientHeight)>80){oldWidth=wrap.clientWidth;oldHeight=wrap.clientHeight;if(state.follow&&state.started)tour();else setCamera(state.step,true);}}).observe(wrap);
  const ray=new THREE.Raycaster();let down;
  $('#scene').addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY};});
  $('#scene').addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down.x,e.clientY-down.y)>5)return;const r=renderer.domElement.getBoundingClientRect();ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),camera);const hit=ray.intersectObjects(pickables).find(h=>{let o=h.object;while(o){if(!o.visible)return false;o=o.parent}return true});if(hit){setFollow(false);state.step=hit.object.userData.part;setCamera(state.step);}});
@@ -426,11 +423,10 @@ function init(){
  renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();state.playing=false;$('#loading').hidden=false;$('#loading').className='error';$('#loading').textContent='3Dの描画が中断されました。ページを再読み込みしてください。';});
  $('#loading').hidden=true;updateButtons();updateVisuals();requestAnimationFrame(animate);
 }
-function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-(lastTime||now))/1000,.06);lastTime=now;if(document.hidden)return;if(state.playing){if(state.rodTime!==null){state.rodTime=Math.min(4.5,state.rodTime+dt*state.speed);if(state.rodTime===4.5){state.playing=false;updateButtons();}}else state.time+=dt*state.speed;}if(state.follow&&state.started&&state.rodTime===null&&state.time<=30)tour();else if(cameraTween){cameraTween.elapsed+=dt;const f=ramp(cameraTween.elapsed,0,.95);camera.position.lerpVectors(cameraTween.from,cameraTween.to,f);controls.target.lerpVectors(cameraTween.fromTarget,cameraTween.target,f);if(f===1)cameraTween=null;}updateVisuals();controls.update();updateLabels();renderer.render(scene,camera);state.rendered=true;}
-$('#insert-rods').onclick=insertRods;
-$('#start').onclick=start;$('#pause').onclick=()=>{if(state.rodTime===4.5)state.rodTime=0;state.playing=!state.playing;updateButtons();};$('#reset').onclick=reset;
+function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-(lastTime||now))/1000,.06);lastTime=now;if(document.hidden)return;if(state.playing)state.time+=dt*state.speed;if(state.follow&&state.started&&state.time<=30)tour();else if(cameraTween){cameraTween.elapsed+=dt;const f=ramp(cameraTween.elapsed,0,.95);camera.position.lerpVectors(cameraTween.from,cameraTween.to,f);controls.target.lerpVectors(cameraTween.fromTarget,cameraTween.target,f);if(f===1)cameraTween=null;}updateVisuals();controls.update();updateLabels();renderer.render(scene,camera);state.rendered=true;}
+$('#start').onclick=start;$('#pause').onclick=()=>{state.playing=!state.playing;updateButtons();};$('#reset').onclick=reset;
 $('#speed').onchange=e=>state.speed=Number(e.target.value);$('#follow').onclick=()=>setFollow(!state.follow);
-$('#timeline').oninput=e=>{if(state.rodTime!==null)state.rodTime=Number(e.target.value)/30*4.5;else state.time=Number(e.target.value);updateVisuals();if(state.follow&&state.rodTime===null)tour();};
+$('#timeline').oninput=e=>{state.time=Number(e.target.value);updateVisuals();if(state.follow)tour();};
 $$('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));$$('[data-reactor]').forEach(b=>b.onclick=()=>chooseReactor(b.dataset.reactor));
 $('#reset-camera').onclick=()=>{setFollow(false);state.step='overview';setCamera('overview');};
 function zoom(f){if(!camera)return;setFollow(false);camera.position.sub(controls.target).multiplyScalar(f).add(controls.target);controls.update();}
